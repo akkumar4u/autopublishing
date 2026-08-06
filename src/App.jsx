@@ -58,7 +58,24 @@ function App() {
   const passCount = checks.filter(c => c.state === 'pass').length;
   const blockers = checks.filter(c => c.state === 'error').length;
   const score = Math.round((passCount / checks.length) * 100);
-  const prettyHtml = [post.imageShortcode, post.content, post.buttons].filter(Boolean).join('\n\n');
+  // Inject the Buttons shortcode after the first </p> in the content so it
+  // appears right below the intro paragraph in the final WordPress HTML.
+  const prettyHtml = (() => {
+    let content = post.content || '';
+    if (post.buttons) {
+      const firstParaEnd = content.indexOf('</p>');
+      if (firstParaEnd !== -1) {
+        content =
+          content.slice(0, firstParaEnd + 4) +
+          '\n\n' + post.buttons + '\n\n' +
+          content.slice(firstParaEnd + 4);
+      } else {
+        // No paragraph found — just prepend buttons
+        content = post.buttons + '\n\n' + content;
+      }
+    }
+    return [post.imageShortcode, content].filter(Boolean).join('\n\n');
+  })();
   const update = (key, value) => setPost(p => ({ ...p, [key]: value }));
   const notify = (text) => { setToast(text); setTimeout(() => setToast(''), 2800); };
   const copyValue = async (value, label) => { try { await navigator.clipboard.writeText(value); notify(`${label} copied.`); } catch { notify('Select and copy the text manually.'); } };
@@ -191,7 +208,7 @@ onClick={() => setExportOpen(true)}
         <section className="editor-pane">
           <div className="editor-heading"><div><p className="eyebrow">BLOG POST</p><h1>Compose & review</h1></div><button className="import-button" onClick={() => setImportOpen(true)}><Globe2 size={16}/> Import from Google Docs</button></div>
           <label className="field title-field"><span>Post title</span><input value={post.title} onChange={e => update('title', e.target.value)} /></label>
-          <div className="editor-toolbar"><button><b>H1</b></button><button><b>B</b></button><button><i>I</i></button><button>↗</button><button>☷</button><span></span><button><Link2 size={16}/></button><button><Image size={16}/></button><button>•••</button></div>
+          <div className="editor-toolbar"><button><b>H1</b></button><button><b>B</b></button><button><i>I</i></button><button>↗</button><button>☷</button><span></span><button><Link2 size={16}/></button><button><Image size={16}/></button><button onClick={() => copyValue(post.content, 'Content HTML')} title="Copy raw HTML of the content body"><Copy size={15}/> Copy HTML</button><button>•••</button></div>
           <div className="rich-editor" contentEditable suppressContentEditableWarning onInput={e => update('content', e.currentTarget.innerHTML)} dangerouslySetInnerHTML={{__html: post.content}} />
           <div className="editor-footer"><span><Clock3 size={15}/> Last saved just now</span><span>{post.content.replace(/<[^>]*>/g,' ').trim().split(/\s+/).filter(Boolean).length} words</span></div>
         </section>

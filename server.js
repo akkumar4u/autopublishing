@@ -72,9 +72,9 @@ function readLabel(lines, label) {
 }
 
 // Cleans Google Docs inner HTML: converts bold/italic spans → <strong>/<em>,
-// strips leftover span wrappers and junk attributes.
+// strips leftover span wrappers, nested <p> tags (inside li), and junk attributes.
 function cleanInnerHtml(html = '') {
-  return html
+  let result = html
     // Google Docs bold: <span style="font-weight:700"> or font-weight:bold
     .replace(/<span[^>]*font-weight\s*:\s*(bold|[6-9]00|1000)[^>]*>([\s\S]*?)<\/span>/gi, '<strong>$2</strong>')
     // Google Docs italic: <span style="font-style:italic">
@@ -82,6 +82,8 @@ function cleanInnerHtml(html = '') {
     // Plain <b> / <i> tags
     .replace(/<b([^>]*)>([\s\S]*?)<\/b>/gi, '<strong>$2</strong>')
     .replace(/<i([^>]*)>([\s\S]*?)<\/i>/gi, '<em>$2</em>')
+    // Strip nested <p> tags that Google Docs adds inside <li> elements
+    .replace(/<\/?p[^>]*>/gi, '')
     // Strip all remaining <span> tags (keep inner text)
     .replace(/<\/?span[^>]*>/gi, '')
     // Strip all attributes from allowed inline tags
@@ -90,6 +92,16 @@ function cleanInnerHtml(html = '') {
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Fix: if Google Docs exported the ENTIRE li line as one bold span
+  // (e.g. <strong>Length: 194.7 inches</strong>), split at the first colon
+  // so only the label is bold and the value is plain text.
+  result = result.replace(
+    /^<strong>([^:<>]+):\s*([^<]+)<\/strong>$/i,
+    '<strong>$1:</strong> $2'
+  );
+
+  return result;
 }
 
 // Builds content HTML from DOM elements, preserving bold inside list items
@@ -191,7 +203,7 @@ function parseDealerTemplate(sourceHtml) {
     keyword,
     imageShortcode:  shortcode,
     buttons,
-    content: `<h1>${escapeHtml(title)}</h1>\n` + bodyHtml,
+    content: bodyHtml,
   };
 }
 
