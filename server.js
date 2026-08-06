@@ -20,7 +20,6 @@ const escapeHtml = (value = '') =>
     "'": '&#39;'
   }[char]));
 
-
 const wpConfig = () => {
 
   const { WP_SITE, WP_ACCESS_TOKEN } = process.env;
@@ -35,13 +34,11 @@ const wpConfig = () => {
   return {
     url:
       'https://public-api.wordpress.com/rest/v1.1/sites/' +
-      WP_SITE.replace('https://',''),
+      WP_SITE.replace('https://', ''),
 
-    auth:
-      `Bearer ${WP_ACCESS_TOKEN}`
+    auth: `Bearer ${WP_ACCESS_TOKEN}`
   };
 };
-
 
 function googleExportUrl(url) {
 
@@ -55,242 +52,260 @@ function googleExportUrl(url) {
   return `https://docs.google.com/document/d/${match[1]}/export?format=html`;
 }
 
+function readLabel(lines, label) {
 
-function readLabel(lines,label){
+  // Match lines that start with the label, optionally followed by
+  // a parenthetical qualifier before the colon, e.g.:
+  //   "Meta Title (under 70 characters): ..."
+  const pattern = new RegExp(
+    '^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\([^)]*\\))?\\s*:',
+    'i'
+  );
 
-  const row =
-    lines.find(line =>
-      line.toLowerCase()
-      .startsWith(label.toLowerCase())
-    );
+  const row = lines.find(line => pattern.test(line));
 
-  return row
-    ? row.slice(row.indexOf(':') + 1).trim()
-    : '';
+  if (!row) return '';
+
+  // Slice from the first colon onward
+  const colonIdx = row.indexOf(':');
+  return colonIdx >= 0 ? row.slice(colonIdx + 1).trim() : '';
 }
 
+// Cleans Google Docs inner HTML: converts bold/italic spans → <strong>/<em>,
+// strips leftover span wrappers and junk attributes.
+function cleanInnerHtml(html = '') {
+  return html
+    // Google Docs bold: <span style="font-weight:700"> or font-weight:bold
+    .replace(/<span[^>]*font-weight\s*:\s*(bold|[6-9]00|1000)[^>]*>([\s\S]*?)<\/span>/gi, '<strong>$2</strong>')
+    // Google Docs italic: <span style="font-style:italic">
+    .replace(/<span[^>]*font-style\s*:\s*italic[^>]*>([\s\S]*?)<\/span>/gi, '<em>$1</em>')
+    // Plain <b> / <i> tags
+    .replace(/<b([^>]*)>([\s\S]*?)<\/b>/gi, '<strong>$2</strong>')
+    .replace(/<i([^>]*)>([\s\S]*?)<\/i>/gi, '<em>$2</em>')
+    // Strip all remaining <span> tags (keep inner text)
+    .replace(/<\/?span[^>]*>/gi, '')
+    // Strip all attributes from allowed inline tags
+    .replace(/<(strong|em)(\s[^>]*)?>/gi, '<$1>')
+    // Non-breaking spaces → regular space
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
+// Builds content HTML from DOM elements, preserving bold inside list items
+// and wrapping consecutive <li> elements in a <ul> block.
+function buildContentHtml($, elements) {
+  let html = '';
+  let inList = false;
 
-function htmlFromLines(lines){
+  elements.forEach(el => {
+    const tag      = el.tagName.toLowerCase();
+    const inner    = cleanInnerHtml($(el).html() || '');
+    const plain    = text($(el).text());
 
-  let firstTitle=true;
-
-  return lines
-  .filter(Boolean)
-  .map(line=>{
-
-    if(/^<[^>]+>/.test(line))
-      return line;
-
-
-    if(firstTitle){
-      firstTitle=false;
-      return `<h1>${escapeHtml(line)}</h1>`;
+    if (tag === 'li') {
+      if (!inList) { html += '<ul>\n'; inList = true; }
+      html += `  <li>${inner}</li>\n`;
+      return;
     }
 
+    // Close any open list before writing a non-li element
+    if (inList) { html += '</ul>\n'; inList = false; }
 
-    if(/^(20\d{2}\s|Test-Drive)/i.test(line))
-      return `<h2>${escapeHtml(line)}</h2>`;
+    if (tag === 'h1') {
+      html += `<h1>${inner}</h1>\n`;
+    } else if (tag === 'h2' || tag === 'h3' || tag === 'h4') {
+      html += `<h2>${inner}</h2>\n`;
+    } else if (
+      /^20\d{2}\s/.test(plain) ||
+      /^(Test-Drive|Exterior|Interior|Performance|Safety|Technology|Colors|Dimensions|Features|FAQ)/i.test(plain) ||
+      (plain.length <= 80 && !/[.!?]$/.test(plain) && /^[A-Z]/.test(plain) && plain.split(' ').length <= 10)
+    ) {
+      html += `<h2>${inner}</h2>\n`;
+    } else if (plain) {
+      html += `<p>${inner}</p>\n`;
+    }
+  });
 
-
-    return `<p>${escapeHtml(line)}</p>`;
-
-  })
-  .join('\n');
+  if (inList) html += '</ul>\n';
+  return html;
 }
 
+// Known metadata label prefixes used in dealer templates
+const META_LABEL_PATTERN =
+  /^(keywords|meta title|meta description|page slug|image shortcode|cta buttons|buttons)/i;
 
+function parseDealerTemplate(sourceHtml) {
 
-function parseDealerTemplate(sourceHtml){
-
-  const $=cheerio.load(sourceHtml);
+  const $ = cheerio.load(sourceHtml);
 
   $('script,style,meta,link').remove();
 
+  // ── Plain-text lines for metadata extraction ──────────────────────────────
+  const allElements = $('body').find('p,h1,h2,h3,h4,li').toArray();
 
-  const lines =
-    $('body')
-    .find('p,h1,h2,h3,h4,li')
-    .map((_,el)=>text($(el).text()))
-    .get()
+  const lines = allElements
+    .map(el => text($(el).text()))
     .filter(Boolean);
 
+  // Read all metadata fields from the full lines array
+  const slug      = readLabel(lines, 'Page Slug').replace(/^\/+|\/+$/g, '');
+  const metaTitle = readLabel(lines, 'Meta Title');
+  const metaDesc  = readLabel(lines, 'Meta Description');
+  const keyword   = readLabel(lines, 'Keywords');
+  const shortcode = readLabel(lines, 'Image Shortcode');
+  const buttons   = readLabel(lines, 'Buttons') || readLabel(lines, 'CTA Buttons');
 
+  // Collect all known metadata values to exclude them from article content
+  const metaValues = new Set(
+    [slug, metaTitle, metaDesc, keyword, shortcode, buttons].filter(Boolean)
+  );
 
-  const contentLines =
-    lines.filter(line =>
-      !/^(keywords|meta title|meta description|page slug|image shortcode|buttons):/i.test(line)
-    );
+  // ── Find where the article content starts ────────────────────────────────
+  // Skip metadata label lines AND their extracted values
+  const contentStartIndex = allElements.findIndex(el => {
+    const plain = text($(el).text());
+    return plain && !META_LABEL_PATTERN.test(plain) && !metaValues.has(plain);
+  });
 
+  if (contentStartIndex < 0) {
+    return { title: 'Untitled post', slug, metaTitle, metaDescription: metaDesc,
+             keyword, imageShortcode: shortcode, buttons, content: '' };
+  }
+
+  const contentElements = allElements.slice(contentStartIndex);
+
+  // First element is the article headline
+  const title = text($(contentElements[0]).text()) || 'Untitled post';
+
+  // Body is everything after the title — built with DOM traversal so bold /
+  // italic inside <li> items is preserved as <strong> / <em>
+  const bodyElements = contentElements.slice(1);
+  const bodyHtml = buildContentHtml($, bodyElements);
 
   return {
-
-    title:contentLines[0] || 'Untitled post',
-
-    slug:
-      readLabel(lines,'Page Slug')
-      .replace(/^\/+|\/+$/g,''),
-
-    metaTitle:
-      readLabel(lines,'Meta Title'),
-
-    metaDescription:
-      readLabel(lines,'Meta Description'),
-
-    keyword:
-      readLabel(lines,'Keywords'),
-
-    imageShortcode:
-      readLabel(lines,'Image Shortcode'),
-
-    buttons:
-      readLabel(lines,'Buttons'),
-
-    content:
-      htmlFromLines(contentLines)
-
+    title,
+    slug,
+    metaTitle,
+    metaDescription: metaDesc,
+    keyword,
+    imageShortcode:  shortcode,
+    buttons,
+    content: `<h1>${escapeHtml(title)}</h1>\n` + bodyHtml,
   };
-
 }
 
+// Import Google Doc
+app.post('/api/import', async (req, res) => {
 
+  try {
 
-// Import Google Doc only
-app.post('/api/import',async(req,res)=>{
+    const exportUrl =
+      googleExportUrl(req.body.url || '');
 
-try{
+    const response =
+      await fetch(exportUrl);
 
- const exportUrl =
-   googleExportUrl(req.body.url || '');
+    if (!response.ok)
+      throw new Error('Cannot read Google Doc');
 
- const response =
-   await fetch(exportUrl);
+    const data =
+      parseDealerTemplate(
+        await response.text()
+      );
 
+    res.json(data);
 
- if(!response.ok)
-   throw new Error('Cannot read Google Doc');
+  } catch (error) {
 
+    res.status(400).json({
+      error: error.message
+    });
 
- const data =
-   parseDealerTemplate(
-     await response.text()
-   );
-
-
- res.json(data);
-
-
-}catch(error){
-
- res.status(400)
- .json({
-   error:error.message
- });
-
-}
+  }
 
 });
-
-
-
 
 // Create WordPress Draft
-app.post('/api/wordpress/draft',async(req,res)=>{
+app.post('/api/wordpress/draft', async (req, res) => {
 
+  try {
 
-try{
+    const config = wpConfig();
 
+    const post = req.body;
 
-const config=wpConfig();
+    const content = [
+      post.imageShortcode,
+      post.content,
+      post.buttons
+    ]
+      .filter(Boolean)
+      .join('\n\n');
 
-const post=req.body;
+    const response =
+      await fetch(
+        `${config.url}/posts/new`,
+        {
+          method: 'POST',
 
+          headers: {
+            Authorization: config.auth,
+            'Content-Type': 'application/json'
+          },
 
-const content=[
- post.imageShortcode,
- post.content,
- post.buttons
-]
-.filter(Boolean)
-.join('\n\n');
+          body: JSON.stringify({
 
+            title: post.title,
 
+            content: content,
 
-const response =
- await fetch(
- `${config.url}/posts/new`,
- {
- method:'POST',
+            status: 'draft'
 
- headers:{
- Authorization:config.auth,
- 'Content-Type':'application/json'
- },
+          })
 
- body:JSON.stringify({
+        });
 
- title:post.title,
+    const result =
+      await response.json();
 
- content:content,
+    if (!response.ok) {
 
- status:'draft'
+      throw new Error(
+        result.error ||
+        result.message ||
+        'WordPress rejected draft'
+      );
 
- })
+    }
 
- });
+    res.json({
 
+      success: true,
 
-const result =
- await response.json();
+      id: result.ID,
 
+      title: result.title,
 
+      url: result.URL
 
-if(!response.ok){
+    });
 
- throw new Error(
- result.error ||
- result.message ||
- 'WordPress rejected draft'
- );
+  } catch (error) {
 
-}
+    console.error(error);
 
+    res.status(400).json({
+      error: error.message
+    });
 
-
-res.json({
-
- success:true,
-
- id:result.ID,
-
- title:result.title,
-
- url:result.URL
-
-});
-
-
-}catch(error){
-
-console.error(error);
-
-
-res.status(400)
-.json({
- error:error.message
-});
-
-
-}
-
+  }
 
 });
-
-
 
 app.listen(
-8787,
-()=>console.log(
-'Publishing bridge running at http://127.0.0.1:8787'
-)
+  8787,
+  () => console.log(
+    'Publishing bridge running at http://127.0.0.1:8787'
+  )
 );
