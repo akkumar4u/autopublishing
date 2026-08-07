@@ -318,6 +318,6 @@ app.post('/api/wordpress/draft', async (req, res) => {
 app.listen(
   8787,
   () => console.log(
-    'Publishing bridge running at http://127.0.0.1:8787'
+    'Publishing bridge running at https://autopublishing.up.railway.app/'
   )
 );
