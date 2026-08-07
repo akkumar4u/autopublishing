@@ -89,8 +89,16 @@ function App() {
     if (!importUrl.trim()) return notify('Paste a Google Docs link first.');
     setImporting(true);
     try {
-      const response = await fetch('http://127.0.0.1:8787/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: importUrl }) });
-      const data = await response.json();
+      const response = await fetch(
+  'https://autopublishing.up.railway.app/api/import',
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ url: importUrl })
+  }
+);      const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       setPost(current => ({ ...current, ...data, tags: data.keyword || current.tags }));
       setImportOpen(false);
@@ -103,19 +111,19 @@ const publishToWordPress = async (status = 'Draft') => {
 
   try {
 
-    const response = await fetch(
-      'http://127.0.0.1:8787/api/wordpress/draft',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          ...post,
-          status
-        })
-      }
-    );
+const response = await fetch(
+  'https://autopublishing.up.railway.app/api/wordpress/draft',
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      ...post,
+      status
+    })
+  }
+);
 
 
     const data = await response.json();
