@@ -315,9 +315,10 @@ app.post('/api/wordpress/draft', async (req, res) => {
 
 });
 
-app.listen(
-  8787,
-  () => console.log(
-    'Publishing bridge running at http://127.0.0.1:8787'
-  )
-);
+app.listen(PORT, () => {
+  console.log(`Publishing bridge running on port ${PORT}`);
+});
+
+const PORT = process.env.PORT || 8787;
+
+
