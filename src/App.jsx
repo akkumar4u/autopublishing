@@ -89,16 +89,10 @@ function App() {
     if (!importUrl.trim()) return notify('Paste a Google Docs link first.');
     setImporting(true);
     try {
-      const response = await fetch(
-  'https://autopublishing.up.railway.app/api/import',
-  {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ url: importUrl })
-  }
-);      const data = await response.json();
+      const response = await fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: importUrl }) });
+      const text = await response.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error('Server returned an invalid response.'); }
       if (!response.ok) throw new Error(data.error);
       setPost(current => ({ ...current, ...data, tags: data.keyword || current.tags }));
       setImportOpen(false);
@@ -111,22 +105,24 @@ const publishToWordPress = async (status = 'Draft') => {
 
   try {
 
-const response = await fetch(
-  'https://autopublishing.up.railway.app/api/wordpress/draft',
-  {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      ...post,
-      status
-    })
-  }
-);
+    const response = await fetch(
+      '/api/wordpress/draft',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ...post,
+          status
+        })
+      }
+    );
 
 
-    const data = await response.json();
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { throw new Error('Server returned an invalid response.'); }
 
 
     if (!response.ok) {
