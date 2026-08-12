@@ -13,6 +13,7 @@
       <section class="card import-card">
         <label>Google Doc URL<input id="document-url" type="url" placeholder="https://docs.google.com/document/d/..." autocomplete="off"></label>
         <label>WordPress admin URL<input id="admin-url" type="url" placeholder="https://example.com/wp/wp-admin" autocomplete="off"></label>
+        <button id="save-admin" class="secondary" type="button">Save WordPress URL</button>
         <button id="import" type="button">Import &amp; queue blog post</button>
         <p id="import-status" role="status"></p>
       </section>
@@ -33,6 +34,7 @@
           <pre id="content"></pre>
         </details>
         <button id="fill" type="button">Open &amp; fill WordPress</button>
+        <button id="clear" class="secondary" type="button">Clear queued draft</button>
         <p id="status" role="status"></p>
       </section>
     </main>

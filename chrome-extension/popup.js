@@ -7,6 +7,8 @@ const documentUrl = document.querySelector('#document-url');
 const adminUrl = document.querySelector('#admin-url');
 const importButton = document.querySelector('#import');
 const importStatus = document.querySelector('#import-status');
+const saveAdminButton = document.querySelector('#save-admin');
+const clearButton = document.querySelector('#clear');
 const importedFields = [
   ['Meta title', 'metaTitle'],
   ['Meta description', 'metaDescription'],
@@ -40,6 +42,7 @@ function showDraft(draft, fillStatus) {
     status.textContent = fillStatus.message;
     status.className = fillStatus.ok ? 'success' : 'error';
   }
+  fillButton.disabled = Boolean(fillStatus?.filled);
 }
 
 chrome.runtime.sendMessage({ type: 'GET_PENDING_DRAFT' }, response => {
@@ -68,6 +71,27 @@ importButton.addEventListener('click', () => {
     importStatus.textContent = 'Draft queued. Click Open & fill WordPress below.';
     importStatus.className = 'success';
     showDraft(response.draft);
+  });
+});
+
+saveAdminButton.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'SAVE_WORDPRESS_ADMIN_URL', adminUrl: adminUrl.value.trim() }, response => {
+    importStatus.textContent = response?.ok ? 'WordPress URL saved.' : response?.error || 'Could not save the WordPress URL.';
+    importStatus.className = response?.ok ? 'success' : 'error';
+  });
+});
+
+clearButton.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'CLEAR_PENDING_DRAFT' }, response => {
+    if (!response?.ok) {
+      status.textContent = response?.error || 'Could not clear the draft.';
+      status.className = 'error';
+      return;
+    }
+    draftCard.hidden = true;
+    empty.hidden = false;
+    fillButton.disabled = false;
+    status.textContent = '';
   });
 });
 

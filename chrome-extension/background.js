@@ -86,10 +86,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === 'SAVE_WORDPRESS_ADMIN_URL') {
+    try {
+      const adminUrl = new URL(message.adminUrl || '').toString().replace(/\/$/, '');
+      chrome.storage.local.set({ wordPressAdminUrl: adminUrl })
+        .then(() => sendResponse({ ok: true, adminUrl }))
+        .catch(error => sendResponse({ ok: false, error: error.message }));
+    } catch {
+      sendResponse({ ok: false, error: 'Enter a valid WordPress admin URL.' });
+    }
+    return true;
+  }
+
+  if (message?.type === 'CLEAR_PENDING_DRAFT') {
+    chrome.storage.session.remove([DRAFT_KEY, TARGET_TAB_KEY, STATUS_KEY])
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message?.type === 'OPEN_PENDING_DRAFT') {
     chrome.storage.session.get(DRAFT_KEY).then(async stored => {
       const draft = stored[DRAFT_KEY];
       if (!draft) throw new Error('No post is queued. Return to Auto Publishing and click Send to WP.');
+      const status = await chrome.storage.session.get(STATUS_KEY);
+      if (status[STATUS_KEY]?.filled) {
+        throw new Error('This draft was already filled. Save it in WordPress, then clear it from the extension before importing another document.');
+      }
       const tab = await chrome.tabs.create({ url: postNewUrl(draft.adminUrl) });
       await chrome.storage.session.set({ [TARGET_TAB_KEY]: tab.id });
       sendResponse({ ok: true, tabId: tab.id });
@@ -114,11 +137,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       func: fillGutenbergDraft,
       args: [draft]
     });
-    // A queued draft is single-use. Once its values have been placed in the
-    // new post editor, remove the payload so it can never fill a second time.
-    await chrome.storage.session.remove([DRAFT_KEY, TARGET_TAB_KEY]);
+    // Lock the draft after filling so it cannot fill a second editor, but keep
+    // its content until the user has saved the WordPress draft and clears it.
+    await chrome.storage.session.remove(TARGET_TAB_KEY);
     await chrome.storage.session.set({
-      [STATUS_KEY]: { ok: true, message: `Draft fields filled in the ${result[0]?.result?.editor || 'WordPress'} editor. The queued data was cleared.` }
+      [STATUS_KEY]: { ok: true, filled: true, message: `Draft fields filled in the ${result[0]?.result?.editor || 'WordPress'} editor. Save it in WordPress, then click Clear queued draft here.` }
     });
   } catch (error) {
     console.error('Could not fill the WordPress editor:', error);
