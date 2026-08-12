@@ -56,10 +56,10 @@ function buildArticleHtml(content = '', buttons = '', imageShortcode = '') {
 /* ─── DealerInspire image library base URL ─── */
 const DI_IMAGE_LIBRARY = 'https://prod.image-libary-api.dealerinspire.com/';
 
-// Netlify's direct function URL is reliable in production. Local development
-// continues to use the Express API started with `npm run api`.
-const apiUrl = (name) => import.meta.env.PROD
-  ? `/.netlify/functions/${name}`
+// Netlify redirects `/api/...` to its serverless functions in production;
+// local development continues to use the Express API started with `npm run api`.
+const apiUrl = (name) => name === 'wordpress-draft'
+  ? '/api/wordpress/draft'
   : `/api/${name}`;
 
 function App() {

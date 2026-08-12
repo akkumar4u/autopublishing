@@ -2,3 +2,18 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Route API requests to the serverless handlers. This makes the API work both
+# through the app's original `/api/...` URLs and Netlify's function runtime.
+[[redirects]]
+  from = "/api/import"
+  to = "/.netlify/functions/import"
+  status = 200
+
+[[redirects]]
+  from = "/api/wordpress/draft"
+  to = "/.netlify/functions/wordpress-draft"
+  status = 200
