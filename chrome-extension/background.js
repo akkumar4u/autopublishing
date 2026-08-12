@@ -1,6 +1,7 @@
 const DRAFT_KEY = 'pendingWordPressDraft';
 const STATUS_KEY = 'lastFillStatus';
 const TARGET_TAB_KEY = 'pendingWordPressDraftTabId';
+const IMPORT_ENDPOINT = 'https://autopublishing.netlify.app/api/import';
 
 function postNewUrl(adminUrl) {
   const url = new URL(adminUrl);
@@ -25,6 +26,17 @@ function isNewBlogPostUrl(tabUrl, adminUrl) {
     (url.searchParams.get('post_type') || 'post') === 'post';
 }
 
+function articleHtml(content = '', buttons = '', imageShortcode = '') {
+  let article = content;
+  if (buttons) {
+    const firstParagraphEnd = article.indexOf('</p>');
+    article = firstParagraphEnd === -1
+      ? `${buttons}\n\n${article}`.trim()
+      : `${article.slice(0, firstParagraphEnd + 4)}\n\n${buttons}\n\n${article.slice(firstParagraphEnd + 4)}`.trim();
+  }
+  return [imageShortcode, article].filter(Boolean).join('\n\n');
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'GET_PENDING_DRAFT') {
     chrome.storage.session.get(DRAFT_KEY)
@@ -45,6 +57,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     chrome.storage.session.set({ [DRAFT_KEY]: draft, [STATUS_KEY]: null })
       .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === 'IMPORT_GOOGLE_DOC') {
+    const { documentUrl, adminUrl } = message;
+    if (!documentUrl || !adminUrl) {
+      sendResponse({ ok: false, error: 'Enter both the Google Doc URL and WordPress admin URL.' });
+      return;
+    }
+    fetch(IMPORT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: documentUrl })
+    })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Import failed (HTTP ${response.status}).`);
+        if (!data.title) throw new Error('The Google Doc did not include a blog title.');
+        const draft = { ...data, content: articleHtml(data.content, data.buttons, data.imageShortcode), adminUrl };
+        await chrome.storage.session.set({ [DRAFT_KEY]: draft, [STATUS_KEY]: null });
+        await chrome.storage.local.set({ wordPressAdminUrl: adminUrl });
+        return draft;
+      })
+      .then(draft => sendResponse({ ok: true, draft }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }

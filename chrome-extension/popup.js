@@ -3,6 +3,10 @@ const draftCard = document.querySelector('#draft');
 const status = document.querySelector('#status');
 const fillButton = document.querySelector('#fill');
 const fields = document.querySelector('#fields');
+const documentUrl = document.querySelector('#document-url');
+const adminUrl = document.querySelector('#admin-url');
+const importButton = document.querySelector('#import');
+const importStatus = document.querySelector('#import-status');
 const importedFields = [
   ['Meta title', 'metaTitle'],
   ['Meta description', 'metaDescription'],
@@ -40,6 +44,31 @@ function showDraft(draft, fillStatus) {
 
 chrome.runtime.sendMessage({ type: 'GET_PENDING_DRAFT' }, response => {
   if (response?.ok) showDraft(response.draft, response.status);
+});
+
+chrome.storage.local.get('wordPressAdminUrl').then(stored => {
+  adminUrl.value = stored.wordPressAdminUrl || '';
+});
+
+importButton.addEventListener('click', () => {
+  importButton.disabled = true;
+  importStatus.textContent = 'Importing Google Doc…';
+  importStatus.className = '';
+  chrome.runtime.sendMessage({
+    type: 'IMPORT_GOOGLE_DOC',
+    documentUrl: documentUrl.value.trim(),
+    adminUrl: adminUrl.value.trim()
+  }, response => {
+    importButton.disabled = false;
+    if (!response?.ok) {
+      importStatus.textContent = response?.error || 'Could not import the document.';
+      importStatus.className = 'error';
+      return;
+    }
+    importStatus.textContent = 'Draft queued. Click Open & fill WordPress below.';
+    importStatus.className = 'success';
+    showDraft(response.draft);
+  });
 });
 
 fillButton.addEventListener('click', () => {

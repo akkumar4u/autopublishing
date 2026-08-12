@@ -9,10 +9,16 @@
   <body>
     <main>
       <p class="eyebrow">AUTO PUBLISHING</p>
-      <h1>WordPress draft</h1>
+      <h1>Google Doc → WordPress</h1>
+      <section class="card import-card">
+        <label>Google Doc URL<input id="document-url" type="url" placeholder="https://docs.google.com/document/d/..." autocomplete="off"></label>
+        <label>WordPress admin URL<input id="admin-url" type="url" placeholder="https://example.com/wp/wp-admin" autocomplete="off"></label>
+        <button id="import" type="button">Import &amp; queue blog post</button>
+        <p id="import-status" role="status"></p>
+      </section>
       <section id="empty" class="card">
         <p>No draft is queued.</p>
-        <small>Return to Auto Publishing, import the document, and click Send to WP.</small>
+        <small>Paste a Google Doc link above to create a new blog-post draft.</small>
       </section>
       <section id="draft" class="card" hidden>
         <dl>

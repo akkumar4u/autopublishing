@@ -5,6 +5,10 @@ main { padding: 18px; }
 h1 { font-size: 19px; margin: 0 0 14px; }
 h2 { font-size: 12px; margin: 17px 0 6px; }
 .card { background: #fff; border: 1px solid #dbe6e1; border-radius: 9px; padding: 14px; }
+.import-card { margin-bottom: 12px; }
+.import-card label { color: #536966; display: block; font-size: 11px; font-weight: 700; margin-bottom: 10px; }
+.import-card input { border: 1px solid #cfdcd7; border-radius: 5px; box-sizing: border-box; display: block; font: 12px Arial, sans-serif; margin-top: 5px; padding: 8px; width: 100%; }
+.import-card button { margin-top: 0; }
 .card p { margin: 0 0 7px; font-size: 13px; line-height: 1.4; }
 small { color: #687a76; font-size: 11px; line-height: 1.4; }
 dl { margin: 0; }
