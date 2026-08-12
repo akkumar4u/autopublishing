@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: autopublishing
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WP_SITE
+        sync: false
+      - key: WP_ACCESS_TOKEN
+        sync: false

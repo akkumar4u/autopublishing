@@ -1,0 +1,33 @@
+let publishingModule;
+
+async function publishing() {
+  process.env.NETLIFY_FUNCTION = 'true';
+  publishingModule ??= import('../../server.js');
+  return publishingModule;
+}
+
+const json = (data, status = 200) => new Response(JSON.stringify(data), {
+  status,
+  headers: { 'content-type': 'application/json; charset=utf-8' }
+});
+
+export default async request => {
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  try {
+    const { url = '' } = await request.json();
+    const { googleExportUrl, parseDealerTemplate } = await publishing();
+    const response = await fetch(googleExportUrl(url));
+    if (!response.ok) {
+      throw new Error(
+        `Google Docs returned HTTP ${response.status}. Confirm the document is shared as "Anyone with the link" → Viewer, then try again.`
+      );
+    }
+    return json(parseDealerTemplate(await response.text()));
+  } catch (error) {
+    console.error('Import error:', error.message);
+    return json({ error: error.message || 'Could not import Google Doc' }, 400);
+  }
+};
+
+export const config = { path: '/api/import' };

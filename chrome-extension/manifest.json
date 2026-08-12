@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Publishing WordPress Filler",
+  "description": "Fills a Gutenberg WordPress draft from Auto Publishing using your existing browser session.",
+  "version": "1.0.0",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Auto Publishing WordPress Filler",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["publisher-bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

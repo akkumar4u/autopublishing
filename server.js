@@ -32,11 +32,7 @@ const escapeHtml = (value = '') =>
   }[char]));
 
 const wpConfig = () => {
-
   const { WP_SITE, WP_ACCESS_TOKEN } = process.env;
-
-  console.log("WP SITE:", WP_SITE);
-  console.log("TOKEN LENGTH:", WP_ACCESS_TOKEN?.length);
 
   if (!WP_SITE || !WP_ACCESS_TOKEN) {
     throw new Error('Add WP_SITE and WP_ACCESS_TOKEN to .env');
@@ -46,13 +42,11 @@ const wpConfig = () => {
     url:
       'https://public-api.wordpress.com/rest/v1.1/sites/' +
       WP_SITE.replace('https://', ''),
-
     auth: `Bearer ${WP_ACCESS_TOKEN}`
   };
 };
 
 function googleExportUrl(url) {
-
   const match =
     url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
 
@@ -64,147 +58,292 @@ function googleExportUrl(url) {
 }
 
 function readLabel(lines, label) {
-
-  // Match lines that start with the label, optionally followed by
-  // a parenthetical qualifier before the colon, e.g.:
-  //   "Meta Title (under 70 characters): ..."
   const pattern = new RegExp(
     '^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\([^)]*\\))?\\s*:',
     'i'
   );
 
-  const row = lines.find(line => pattern.test(line));
-
+  const rowIndex = lines.findIndex(line => pattern.test(line));
+  const row = lines[rowIndex];
   if (!row) return '';
 
-  // Slice from the first colon onward
   const colonIdx = row.indexOf(':');
-  return colonIdx >= 0 ? row.slice(colonIdx + 1).trim() : '';
+  const inlineValue = colonIdx >= 0 ? row.slice(colonIdx + 1).trim() : '';
+  if (inlineValue) return inlineValue;
+
+  // Templates often place a label and its value in separate Google Docs
+  // paragraphs. Read the next line unless it starts another metadata field.
+  const nextLine = lines[rowIndex + 1] || '';
+  return /^[^:]{1,80}:/.test(nextLine) ? '' : nextLine;
 }
 
-// Cleans Google Docs inner HTML: converts bold/italic spans → <strong>/<em>,
-// strips leftover span wrappers, nested <p> tags (inside li), and junk attributes.
-function cleanInnerHtml(html = '') {
-  let result = html
-    // Google Docs bold: <span style="font-weight:700"> or font-weight:bold
-    .replace(/<span[^>]*font-weight\s*:\s*(bold|[6-9]00|1000)[^>]*>([\s\S]*?)<\/span>/gi, '<strong>$2</strong>')
-    // Google Docs italic: <span style="font-style:italic">
-    .replace(/<span[^>]*font-style\s*:\s*italic[^>]*>([\s\S]*?)<\/span>/gi, '<em>$1</em>')
-    // Plain <b> / <i> tags
-    .replace(/<b([^>]*)>([\s\S]*?)<\/b>/gi, '<strong>$2</strong>')
-    .replace(/<i([^>]*)>([\s\S]*?)<\/i>/gi, '<em>$2</em>')
-    // Strip nested <p> tags that Google Docs adds inside <li> elements
-    .replace(/<\/?p[^>]*>/gi, '')
-    // Strip all remaining <span> tags (keep inner text)
-    .replace(/<\/?span[^>]*>/gi, '')
-    // Strip all attributes from allowed inline tags
-    .replace(/<(strong|em)(\s[^>]*)?>/gi, '<$1>')
-    // Non-breaking spaces → regular space
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // Fix: if Google Docs exported the ENTIRE li line as one bold span
-  // (e.g. <strong>Length: 194.7 inches</strong>), split at the first colon
-  // so only the label is bold and the value is plain text.
-  result = result.replace(
-    /^<strong>([^:<>]+):\s*([^<]+)<\/strong>$/i,
-    '<strong>$1:</strong> $2'
-  );
-
-  return result;
+function classStyleMap(sourceHtml = '') {
+  const styles = new Map();
+  for (const match of sourceHtml.matchAll(/\.([\w-]+)\s*\{([^}]*)\}/g)) {
+    styles.set(match[1], match[2]);
+  }
+  return styles;
 }
 
-// Builds content HTML from DOM elements, preserving bold inside list items
-// and wrapping consecutive <li> elements in a <ul> block.
-function buildContentHtml($, elements) {
-  let html = '';
-  let inList = false;
+function cleanHref(rawHref = '') {
+  try {
+    const url = new URL(rawHref, 'https://docs.google.com');
+    if (url.hostname === 'www.google.com' && url.pathname === '/url' && url.searchParams.get('q')) {
+      return url.searchParams.get('q');
+    }
+  } catch { /* Keep a non-standard but usable URL unchanged. */ }
+  return rawHref;
+}
 
-  elements.forEach(el => {
-    const tag      = el.tagName.toLowerCase();
-    const inner    = cleanInnerHtml($(el).html() || '');
-    const plain    = text($(el).text());
+function cleanInnerHtml(html = '', styles = new Map()) {
+  const fragment = cheerio.load(`<div id="content-root">${html}</div>`);
+  const root = fragment('#content-root');
 
-    if (tag === 'li') {
-      if (!inList) { html += '<ul>\n'; inList = true; }
-      html += `  <li>${inner}</li>\n`;
+  root.find('*').toArray().reverse().forEach(el => {
+    const node = fragment(el);
+    const tag = el.tagName.toLowerCase();
+    const classStyles = (node.attr('class') || '')
+      .split(/\s+/)
+      .map(name => styles.get(name) || '')
+      .join(';');
+    const style = `${node.attr('style') || ''};${classStyles}`.toLowerCase();
+
+    if (tag === 'a') {
+      const href = cleanHref(node.attr('href') || '');
+      const label = node.text().trim();
+      if (!href || !label) node.replaceWith(node.contents());
+      else node.replaceWith(`<a href="${escapeHtml(href)}">${node.html() || ''}</a>`);
       return;
     }
 
-    // Close any open list before writing a non-li element
-    if (inList) { html += '</ul>\n'; inList = false; }
+    if (tag === 'br') return;
 
-    if (tag === 'h1') {
-      html += `<h1>${inner}</h1>\n`;
-    } else if (tag === 'h2' || tag === 'h3' || tag === 'h4') {
-      html += `<h2>${inner}</h2>\n`;
-    } else if (
+    if (['strong', 'em', 'del', 'code'].includes(tag)) {
+      node.replaceWith(`<${tag}>${node.html() || ''}</${tag}>`);
+      return;
+    }
+
+    let inner = node.html() || '';
+    const isBold = tag === 'b' || tag === 'strong' || /font-weight\s*:\s*(bold|[6-9]00|1000)/.test(style);
+    const isItalic = tag === 'i' || tag === 'em' || /font-style\s*:\s*italic/.test(style);
+    const isStrike = ['s', 'strike', 'del'].includes(tag) || /text-decoration[^;]*line-through/.test(style);
+    const isCode = tag === 'code' || /font-family[^;]*(monospace|courier|consolas|menlo)/.test(style);
+
+    if (isBold) inner = `<strong>${inner}</strong>`;
+    if (isItalic) inner = `<em>${inner}</em>`;
+    if (isStrike) inner = `<del>${inner}</del>`;
+    if (isCode) inner = `<code>${inner}</code>`;
+    node.replaceWith(inner);
+  });
+
+  return (root.html() || '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function listItemLevel($, item, styles) {
+  const node = $(item);
+  const explicit = Number(node.attr('data-level') || node.attr('aria-level'));
+  if (Number.isInteger(explicit) && explicit >= 0) return explicit;
+
+  const classes = node.attr('class') || '';
+  const levelClass = classes.match(/(?:li-(?:bullet|number)|level|indent)[_-](\d+)/i);
+  if (levelClass) return Number(levelClass[1]);
+
+  const classStyles = classes.split(/\s+/).map(name => styles.get(name) || '').join(';');
+  const margin = `${node.attr('style') || ''};${classStyles}`.match(/margin-left\s*:\s*([\d.]+)(px|pt)?/i);
+  if (!margin) return 0;
+  const pixels = Number(margin[1]) * (margin[2]?.toLowerCase() === 'pt' ? 1.333 : 1);
+  return Math.max(0, Math.round(pixels / 36));
+}
+
+function renderList($, list, styles) {
+  const type = list.tagName.toLowerCase() === 'ol' ? 'ol' : 'ul';
+  const items = $(list).children('li').toArray();
+  const entries = items.map(item => ({ item, level: listItemLevel($, item, styles), children: [] }));
+  const roots = [];
+  const stack = [];
+
+  entries.forEach(entry => {
+    while (stack.length && stack[stack.length - 1].level >= entry.level) stack.pop();
+    if (stack.length) stack[stack.length - 1].children.push(entry);
+    else roots.push(entry);
+    stack.push(entry);
+  });
+
+  const renderEntries = (entriesToRender, listType) => `<${listType}>\n${entriesToRender.map(entry => {
+    const item = entry.item;
+    const $item = $(item);
+    const semanticNested = $item.children('ul,ol').toArray().map(child => renderList($, child, styles)).join('');
+    const inferredNested = entry.children.length ? renderEntries(entry.children, 'ul') : '';
+    const clone = $item.clone();
+    clone.children('ul,ol').remove();
+    const checkbox = clone.find('input[type="checkbox"]').first();
+    const marker = checkbox.length ? (checkbox.is('[checked]') ? '☑ ' : '☐ ') : '';
+    clone.find('input[type="checkbox"]').remove();
+    return `  <li>${marker}${cleanInnerHtml(clone.html() || '', styles)}${semanticNested}${inferredNested}</li>`;
+  }).join('\n')}\n</${listType}>`;
+
+  return renderEntries(roots, type);
+}
+
+function renderTable($, table, styles) {
+  const rows = $(table).find('tr').toArray();
+  if (!rows.length) return '';
+  const renderRow = (row, cellTag) => `<tr>${$(row).children('th,td').toArray()
+    .map(cell => `<${cellTag}>${cleanInnerHtml($(cell).html() || '', styles)}</${cellTag}>`).join('')}</tr>`;
+  const header = renderRow(rows[0], 'th');
+  const body = rows.slice(1).map(row => renderRow(row, 'td')).join('\n');
+  return `<table>\n<thead>${header}</thead>\n<tbody>${body}</tbody>\n</table>`;
+}
+
+function renderBlockquote($, quote, styles) {
+  const paragraphs = $(quote).children('p').toArray();
+  if (!paragraphs.length) return `<blockquote>${cleanInnerHtml($(quote).html() || '', styles)}</blockquote>`;
+  return `<blockquote>\n${paragraphs.map(p => `  <p>${cleanInnerHtml($(p).html() || '', styles)}</p>`).join('\n')}\n</blockquote>`;
+}
+
+function buildContentHtml($, elements, styles) {
+  return elements.map(el => {
+    const tag = el.tagName.toLowerCase();
+    const inner = cleanInnerHtml($(el).html() || '', styles);
+    const plain = text($(el).text());
+
+    if (tag === 'ul' || tag === 'ol') return renderList($, el, styles);
+    if (tag === 'table') return renderTable($, el, styles);
+    if (tag === 'blockquote') return renderBlockquote($, el, styles);
+    if (tag === 'pre') return `<pre><code>${escapeHtml($(el).text())}</code></pre>`;
+    if (tag === 'hr') return '<hr>';
+    if (/^h[1-6]$/.test(tag)) return `<${tag}>${inner}</${tag}>`;
+    if (tag === 'li') return `<ul>\n  <li>${inner}</li>\n</ul>`;
+    if (
       /^20\d{2}\s/.test(plain) ||
       /^(Test-Drive|Exterior|Interior|Performance|Safety|Technology|Colors|Dimensions|Features|FAQ)/i.test(plain) ||
       (plain.length <= 80 && !/[.!?]$/.test(plain) && /^[A-Z]/.test(plain) && plain.split(' ').length <= 10)
-    ) {
-      html += `<h2>${inner}</h2>\n`;
-    } else if (plain) {
-      html += `<p>${inner}</p>\n`;
-    }
-  });
-
-  if (inList) html += '</ul>\n';
-  return html;
+    ) return `<h2>${inner}</h2>`;
+    return plain ? `<p>${inner}</p>` : '';
+  }).filter(Boolean).join('\n');
 }
 
-// Known metadata label prefixes used in dealer templates
-const META_LABEL_PATTERN =
-  /^(keywords|meta title|meta description|page slug|image shortcode|cta buttons|buttons)/i;
+function collectContentBlocks($) {
+  const blocks = 'p,h1,h2,h3,h4,h5,h6,ul,ol,li,table,blockquote,pre,hr';
+  return $('body').find(blocks).filter((_, el) => !$(el).parents(blocks).length).toArray();
+}
+
+const FIELD_LABEL_PATTERN =
+  /^(post title|keywords|tags|category|author|alt text|featured image alt text|meta title|meta description|page slug|image shortcode|cta buttons|buttons)\s*(\([^)]*\))?\s*:/i;
+
+const CTA_LINK_SELECTOR = 'a.button, a.primary-button';
+
+function extractButtons(markup = '') {
+  // Google Docs sometimes exports a pasted CTA snippet as plain text. Parse the
+  // snippet and retain only its button links rather than treating it as a title
+  // or paragraph in the article.
+  if (!/<a\b[^>]*\bclass\s*=\s*["'][^"']*\b(?:button|primary-button)\b/i.test(markup)) {
+    return '';
+  }
+
+  const fragment = cheerio.load(markup, null, false);
+  const links = fragment(CTA_LINK_SELECTOR).toArray();
+  if (!links.length) return '';
+
+  const safeLinks = links.map(link => {
+    const node = fragment(link);
+    const href = cleanHref(node.attr('href') || '');
+    const label = text(node.text());
+    if (!href || !label) return '';
+    const classes = (node.attr('class') || '')
+      .split(/\s+/)
+      .filter(className => className === 'button' || className === 'primary-button')
+      .join(' ');
+    return `<a class="${classes || 'button'}" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+  }).filter(Boolean);
+
+  return safeLinks.length ? `<div class="center">${safeLinks.join('')}</div>` : '';
+}
+
+function isMetadataElement($, el) {
+  return FIELD_LABEL_PATTERN.test(text($(el).text()));
+}
+
+function insertButtonsAfterFirstParagraph(content = '', buttons = '') {
+  if (!buttons) return content;
+  const cta = normalizeButtonsHtml(buttons);
+
+  const firstParagraphEnd = content.indexOf('</p>');
+  if (firstParagraphEnd === -1) return `${cta}\n\n${content}`.trim();
+
+  return (
+    content.slice(0, firstParagraphEnd + 4) +
+    `\n\n${cta}\n\n` +
+    content.slice(firstParagraphEnd + 4)
+  ).trim();
+}
+
+function normalizeButtonsHtml(buttons = '') {
+  const fragment = cheerio.load(`<div id="cta-root">${buttons}</div>`);
+  const root = fragment('#cta-root');
+  const groups = root.find('div').filter((_, el) => fragment(el).find('a.button, a.primary-button').length > 1);
+  groups.each((_, group) => {
+    const node = fragment(group);
+    const style = node.attr('style') || '';
+    if (!/\bgap\s*:/i.test(style)) {
+      node.attr('style', `${style.replace(/;?\s*$/, ';')}display:flex;justify-content:center;gap:12px;flex-wrap:wrap;`);
+    }
+  });
+  return (root.html() || '').trim();
+}
 
 function parseDealerTemplate(sourceHtml) {
-
   const $ = cheerio.load(sourceHtml);
-
+  const styles = classStyleMap($('style').text());
   $('script,style,meta,link').remove();
 
-  // ── Plain-text lines for metadata extraction ──────────────────────────────
-  const allElements = $('body').find('p,h1,h2,h3,h4,li').toArray();
+  const allElements = collectContentBlocks($);
 
   const lines = allElements
     .map(el => text($(el).text()))
     .filter(Boolean);
 
-  // Read all metadata fields from the full lines array
+  const suppliedTitle = readLabel(lines, 'Post Title');
   const slug      = readLabel(lines, 'Page Slug').replace(/^\/+|\/+$/g, '');
   const metaTitle = readLabel(lines, 'Meta Title');
   const metaDesc  = readLabel(lines, 'Meta Description');
   const keyword   = readLabel(lines, 'Keywords');
+  const tags      = readLabel(lines, 'Tags');
+  const category  = readLabel(lines, 'Category');
+  const author    = readLabel(lines, 'Author');
+  const altText   = readLabel(lines, 'Alt Text') || readLabel(lines, 'Featured Image Alt Text');
   const shortcode = readLabel(lines, 'Image Shortcode');
-  const buttons   = readLabel(lines, 'Buttons') || readLabel(lines, 'CTA Buttons');
+  const buttonElements = allElements.filter(el => extractButtons(text($(el).text())));
+  const buttons   = extractButtons(readLabel(lines, 'Buttons')) ||
+    extractButtons(readLabel(lines, 'CTA Buttons')) ||
+    buttonElements.map(el => extractButtons(text($(el).text()))).join('');
+  const metadataValues = new Set([
+    suppliedTitle, slug, metaTitle, metaDesc, keyword, tags, category, author,
+    altText, shortcode, buttons
+  ].filter(Boolean));
 
-  // Collect all known metadata values to exclude them from article content
-  const metaValues = new Set(
-    [slug, metaTitle, metaDesc, keyword, shortcode, buttons].filter(Boolean)
-  );
-
-  // ── Find where the article content starts ────────────────────────────────
-  // Skip metadata label lines AND their extracted values
-  const contentStartIndex = allElements.findIndex(el => {
-    const plain = text($(el).text());
-    return plain && !META_LABEL_PATTERN.test(plain) && !metaValues.has(plain);
+  const articleElements = allElements.filter(el => {
+    const tag = el.tagName.toLowerCase();
+    const value = text($(el).text());
+    return (value || tag === 'hr') && !isMetadataElement($, el) &&
+      !metadataValues.has(value) && !extractButtons(value);
   });
 
-  if (contentStartIndex < 0) {
-    return { title: 'Untitled post', slug, metaTitle, metaDescription: metaDesc,
-             keyword, imageShortcode: shortcode, buttons, content: '' };
+  if (!articleElements.length) {
+    return { title: suppliedTitle || 'Untitled post', slug, metaTitle, metaDescription: metaDesc,
+             keyword, tags, category, author, altText, imageShortcode: shortcode,
+             buttons, content: '' };
   }
 
-  const contentElements = allElements.slice(contentStartIndex);
-
-  // First element is the article headline
-  const title = text($(contentElements[0]).text()) || 'Untitled post';
-
-  // Body is everything after the title — built with DOM traversal so bold /
-  // italic inside <li> items is preserved as <strong> / <em>
-  const bodyElements = contentElements.slice(1);
-  const bodyHtml = buildContentHtml($, bodyElements);
+  // WordPress renders the post title as the page H1. Use the document's first
+  // H1 as that title and never copy an H1 into the article body.
+  const h1 = articleElements.find(el => el.tagName.toLowerCase() === 'h1');
+  const title = text(h1 ? $(h1).text() : '') || suppliedTitle || text($(articleElements[0]).text()) || 'Untitled post';
+  const bodyElements = articleElements.filter(el => el.tagName.toLowerCase() !== 'h1');
+  const bodyHtml = buildContentHtml($, bodyElements, styles);
 
   return {
     title,
@@ -212,6 +351,10 @@ function parseDealerTemplate(sourceHtml) {
     metaTitle,
     metaDescription: metaDesc,
     keyword,
+    tags,
+    category,
+    author,
+    altText,
     imageShortcode:  shortcode,
     buttons,
     content: bodyHtml,
@@ -220,121 +363,101 @@ function parseDealerTemplate(sourceHtml) {
 
 // Import Google Doc
 app.post('/api/import', async (req, res) => {
-
   try {
+    const exportUrl = googleExportUrl(req.body.url || '');
+    const response = await fetch(exportUrl);
 
-    const exportUrl =
-      googleExportUrl(req.body.url || '');
-
-    const response =
-      await fetch(exportUrl);
-
-    if (!response.ok)
-      throw new Error('Cannot read Google Doc');
-
-    const data =
-      parseDealerTemplate(
-        await response.text()
+    if (!response.ok) {
+      throw new Error(
+        `Google Docs returned HTTP ${response.status}. Confirm the document is shared as "Anyone with the link" → Viewer, then try again.`
       );
+    }
 
+    const data = parseDealerTemplate(await response.text());
     res.json(data);
 
   } catch (error) {
-
-    res.status(400).json({
-      error: error.message
-    });
-
+    console.error('Import error:', error.message);
+    res.status(400).json({ error: error.message });
   }
-
 });
 
 // Create WordPress Draft
 app.post('/api/wordpress/draft', async (req, res) => {
-
   try {
-
     const config = wpConfig();
-
     const post = req.body;
 
     const content = [
       post.imageShortcode,
-      post.content,
-      post.buttons
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+      insertButtonsAfterFirstParagraph(post.content, post.buttons)
+    ].filter(Boolean).join('\n\n');
 
-    const response =
-      await fetch(
-        `${config.url}/posts/new`,
-        {
-          method: 'POST',
+    const response = await fetch(
+      `${config.url}/posts/new`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: config.auth,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: post.title,
+          content: content,
+          status: 'draft',
+          // Explicitly create a blog post and populate Yoast's actual fields.
+          // `excerpt` alone is not used as Yoast's meta description.
+          type: 'post',
+          slug: post.slug || undefined,
+          excerpt: post.metaDescription || undefined,
+          metadata: [
+            ...(post.metaTitle || post.title
+              ? [{ key: '_yoast_wpseo_title', value: post.metaTitle || post.title, operation: 'update' }]
+              : []),
+            ...(post.metaDescription
+              ? [{ key: '_yoast_wpseo_metadesc', value: post.metaDescription, operation: 'update' }]
+              : [])
+          ]
+        })
+      });
 
-          headers: {
-            Authorization: config.auth,
-            'Content-Type': 'application/json'
-          },
-
-          body: JSON.stringify({
-
-            title: post.title,
-
-            content: content,
-
-            status: 'draft'
-
-          })
-
-        });
-
-    const result =
-      await response.json();
+    const result = await response.json();
 
     if (!response.ok) {
-
       throw new Error(
         result.error ||
         result.message ||
         'WordPress rejected draft'
       );
-
     }
 
     res.json({
-
       success: true,
-
       id: result.ID,
-
       title: result.title,
-
       url: result.URL
-
     });
 
   } catch (error) {
-
-    console.error(error);
-
-    res.status(400).json({
-      error: error.message
-    });
-
+    console.error('WordPress error:', error.message);
+    res.status(400).json({ error: error.message });
   }
-
 });
 
-// SPA catch-all: serve index.html for any non-API route
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+// SPA fallback. Use middleware rather than `app.get('*')`: Express 5's router
+// rejects the legacy `*` path syntax, which otherwise prevents this module from
+// loading in the Netlify import function and surfaces as a blank HTTP 502.
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found.' });
+  }
+
+  return res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 const PORT = process.env.PORT || 8787;
-app.listen(
-  PORT,
-  () => console.log(
-    `Publishing bridge running on port ${PORT}`
-  )
-);
+if (process.env.NODE_ENV !== 'test' && process.env.NETLIFY_FUNCTION !== 'true') {
+  app.listen(PORT, () => console.log(`Publishing bridge running on port ${PORT}`));
+}
+
+export { googleExportUrl, insertButtonsAfterFirstParagraph, parseDealerTemplate, wpConfig };

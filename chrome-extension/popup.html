@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auto Publishing</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">AUTO PUBLISHING</p>
+      <h1>WordPress draft</h1>
+      <section id="empty" class="card">
+        <p>No draft is queued.</p>
+        <small>Return to Auto Publishing, import the document, and click Send to WP.</small>
+      </section>
+      <section id="draft" class="card" hidden>
+        <dl>
+          <div><dt>Title</dt><dd id="title"></dd></div>
+          <div><dt>Slug</dt><dd id="slug"></dd></div>
+          <div><dt>Target</dt><dd id="target"></dd></div>
+        </dl>
+        <h2>Imported fields</h2>
+        <dl id="fields"></dl>
+        <details>
+          <summary>Blog content HTML</summary>
+          <pre id="content"></pre>
+        </details>
+        <button id="fill" type="button">Open &amp; fill WordPress</button>
+        <p id="status" role="status"></p>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
