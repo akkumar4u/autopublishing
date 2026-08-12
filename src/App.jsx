@@ -56,6 +56,12 @@ function buildArticleHtml(content = '', buttons = '', imageShortcode = '') {
 /* ─── DealerInspire image library base URL ─── */
 const DI_IMAGE_LIBRARY = 'https://prod.image-libary-api.dealerinspire.com/';
 
+// Netlify's direct function URL is reliable in production. Local development
+// continues to use the Express API started with `npm run api`.
+const apiUrl = (name) => import.meta.env.PROD
+  ? `/.netlify/functions/${name}`
+  : `/api/${name}`;
+
 function App() {
   const [active, setActive] = useState('Editor');
   const [posts, setPosts] = useState(initialPosts);
@@ -173,7 +179,7 @@ function App() {
     if (!importUrl.trim()) return notify('Paste a Google Docs link first.');
     setImporting(true);
     try {
-      const response = await fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: importUrl }) });
+      const response = await fetch(apiUrl('import'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: importUrl }) });
       const raw = await response.text();
       let data;
       try { data = raw ? JSON.parse(raw) : {}; } catch {
@@ -194,7 +200,7 @@ function App() {
   const publishToWordPress = async (status = 'Draft') => {
     setPublishing(true);
     try {
-      const response = await fetch('/api/wordpress/draft', {
+      const response = await fetch(apiUrl('wordpress-draft'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...post, status })
