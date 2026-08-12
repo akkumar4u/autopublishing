@@ -456,7 +456,7 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 8787;
-if (process.env.NODE_ENV !== 'test' && process.env.NETLIFY_FUNCTION !== 'true') {
+if (process.env.NODE_ENV !== 'test' && process.env.NETLIFY_FUNCTION !== 'true' && process.env.NETLIFY !== 'true') {
   app.listen(PORT, () => console.log(`Publishing bridge running on port ${PORT}`));
 }
 
